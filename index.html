@@ -183,6 +183,7 @@ button:active { transform: scale(0.97); }
     <p style="font-size:0.85rem;color:#92400e;">正解は…</p>
     <p id="player-reveal-answer" style="font-size:1.3rem;font-weight:bold;color:#92400e;"></p>
   </div>
+  <div id="player-my-result"></div>
   <div id="player-reveal-result"></div>
   <div class="card" style="text-align:center;">
     <p style="font-size:0.85rem;color:#6b7280;margin-bottom:4px;">現在のスコア</p>
@@ -199,7 +200,8 @@ button:active { transform: scale(0.97); }
 </div>
 
 <script>
-const S = {
+// 履歴記録
+S.history = []; // [{question, ownerName, answers:{}}]
   role: null, peer: null, hostConn: null,
   playerConns: {}, playerNames: {},
   players: [], answers: {}, currentQ: null,
@@ -326,7 +328,9 @@ function confirmAnswer() {
   S.currentQ.ownerName = owner;
   S.players.forEach(p => { if (S.answers[p.name] === owner) p.score++; });
   const scores = {}; S.players.forEach(p => scores[p.name] = p.score);
-  hostBroadcast({ type: 'confirmed', ownerName: owner, question: S.currentQ.text, answers: S.answers, scores });
+  // 履歴保存
+  S.history.push({ question: S.currentQ.text, ownerName: owner, answers: Object.assign({}, S.answers) });
+  hostBroadcast({ type: 'confirmed', ownerName: owner, question: S.currentQ.text, answers: S.answers, scores, players: S.players.map(p=>p.name), history: S.history });
   document.getElementById('reveal-answer').textContent = owner + ' さん';
   document.getElementById('reveal-list-confirmed').innerHTML = S.players.map(p => {
     const ans = S.answers[p.name], ok = ans === owner;
@@ -345,18 +349,51 @@ function nextQuestion() {
 }
 function showResult() {
   const scores = {}; S.players.forEach(p => scores[p.name] = p.score);
-  hostBroadcast({ type: 'result', scores });
-  renderResultScreen(scores); show('screen-result');
+  hostBroadcast({ type: 'result', scores, players: S.players.map(p=>p.name), history: S.history });
+  renderResultScreen(S.players.map(p=>p.name), scores, S.history);
+  show('screen-result');
 }
-function renderResultScreen(scores) {
-  const sorted = Object.entries(scores).sort((a,b) => b[1]-a[1]);
+function renderResultScreen(players, scores, history) {
+  // ── 集計表 ──
+  // 縦：問題（正解者名）、横：回答者、最終列：合計
+  let html = `<div style="overflow-x:auto;">
+    <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+      <thead>
+        <tr style="background:#eef2ff;">
+          <th style="padding:8px;text-align:left;border-bottom:2px solid #c7d2fe;min-width:80px;">問題</th>
+          ${players.map(p=>`<th style="padding:8px;text-align:center;border-bottom:2px solid #c7d2fe;min-width:60px;">${p}</th>`).join('')}
+        </tr>
+      </thead>
+      <tbody>`;
+  history.forEach((h, i) => {
+    html += `<tr style="border-bottom:1px solid #f3f4f6;">
+      <td style="padding:8px;font-size:0.8rem;color:#6b7280;">Q${i+1}<br><span style="color:#374151;font-weight:bold;">${h.ownerName}</span></td>
+      ${players.map(p => {
+        const ans = h.answers[p];
+        const ok = ans === h.ownerName;
+        const bg = ans ? (ok ? '#dcfce7' : '#fee2e2') : '#f9fafb';
+        return `<td style="padding:8px;text-align:center;background:${bg};">${ans ? (ok?'⭕':'❌') : '－'}</td>`;
+      }).join('')}
+    </tr>`;
+  });
+  // 合計行
+  html += `<tr style="background:#eef2ff;font-weight:bold;">
+    <td style="padding:8px;">合計</td>
+    ${players.map(p=>`<td style="padding:8px;text-align:center;color:#4338ca;">${scores[p]||0}</td>`).join('')}
+  </tr>`;
+  html += `</tbody></table></div>`;
+
+  // ── 順位 ──
+  const sorted = Object.entries(scores).sort((a,b)=>b[1]-a[1]);
   const ranks = ['🥇','🥈','🥉'];
-  document.getElementById('result-list').innerHTML = sorted.map(([name, score], i) =>
-    `<div class="score-row">
+  html += sorted.map(([name, score], i) =>
+    `<div class="score-row" style="margin-top:${i===0?'16px':'0'}">
       <span style="font-size:1.3rem;margin-right:10px;">${ranks[i]||(i+1)+'位'}</span>
       <span style="font-weight:bold;flex:1;">${name}</span>
       <span style="font-size:1.2rem;font-weight:bold;color:#6366f1;">${score}問正解</span></div>`
   ).join('');
+
+  document.getElementById('result-list').innerHTML = html;
 }
 
 // ── PLAYER ──
@@ -403,13 +440,16 @@ function playerReceive(data) {
     document.getElementById('wait-msg').textContent = '正解を発表中です…';
     show('screen-player-wait');
   } else if (data.type === 'confirmed') {
+    // 履歴をプレイヤー側でも保持
+    if (!S.history) S.history = [];
+    S.history.push({ question: data.question, ownerName: data.ownerName, answers: data.answers });
     showPlayerReveal(data);
   } else if (data.type === 'next') {
     S.mySelected = null;
     document.getElementById('wait-msg').textContent = '次の問題を準備中です…';
     show('screen-player-wait');
   } else if (data.type === 'result') {
-    showPlayerResult(data.scores);
+    showPlayerResult(data.scores, data.players, data.history);
   }
 }
 function selectOption(name) {
@@ -430,22 +470,32 @@ function showPlayerReveal(data) {
   const myAns = data.answers ? data.answers[S.myName] : null;
   const correct = myAns === owner;
   if (correct && !S._scoredQs.has(data.question)) { S._myScore++; S._scoredQs.add(data.question); }
-  document.getElementById('player-reveal-result').innerHTML =
+
+  // 自分の正誤
+  document.getElementById('player-my-result').innerHTML =
     `<div class="card" style="background:${correct?'#dcfce7':'#fee2e2'};text-align:center;margin-bottom:12px;">
       <p style="font-size:1.5rem;">${correct ? '⭕ 正解！' : '❌ 不正解'}</p>
       <p style="font-size:0.9rem;color:#374151;">あなたの回答：${myAns||'未回答'}</p></div>`;
+
+  // 全員の回答一覧
+  const players = data.players || [];
+  document.getElementById('player-reveal-result').innerHTML = players.map(p => {
+    const ans = data.answers ? data.answers[p] : null;
+    const ok = ans === owner;
+    const bg = ans ? (ok ? '#dcfce7' : '#fee2e2') : '#f9fafb';
+    const isMe = p === S.myName;
+    return `<div class="answer-row" style="background:${bg}">
+      <span class="player-name">${p}${isMe ? ' 👈' : ''}</span>
+      <span class="answer-val">→ ${ans || '未回答'}</span>
+      <span>${ans ? (ok ? '⭕' : '❌') : '－'}</span>
+    </div>`;
+  }).join('');
+
   document.getElementById('player-score-display').textContent = S._myScore + '問正解';
   show('screen-player-reveal');
 }
-function showPlayerResult(scores) {
-  const sorted = Object.entries(scores).sort((a,b) => b[1]-a[1]);
-  const ranks = ['🥇','🥈','🥉'];
-  document.getElementById('result-list').innerHTML = sorted.map(([name, score], i) =>
-    `<div class="score-row" style="${name===S.myName?'background:#eef2ff;border-radius:8px;padding:10px;':''}">
-      <span style="font-size:1.3rem;margin-right:10px;">${ranks[i]||(i+1)+'位'}</span>
-      <span style="font-weight:bold;flex:1;">${name}${name===S.myName?' 👈':''}</span>
-      <span style="font-size:1.2rem;font-weight:bold;color:#6366f1;">${score}問正解</span></div>`
-  ).join('');
+function showPlayerResult(scores, players, history) {
+  renderResultScreen(players || [], scores, history || []);
   show('screen-result');
 }
 </script>
