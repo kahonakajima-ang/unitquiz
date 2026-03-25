@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>私はだれでしょうクイズ</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.4.7/peerjs.min.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Hiragino Sans', 'Meiryo', sans-serif; background: #f0f4ff; min-height: 100vh; }
+.screen { display: none; padding: 24px; max-width: 600px; margin: 0 auto; }
+.screen.active { display: block; }
+h1 { font-size: 1.4rem; font-weight: bold; margin-bottom: 20px; color: #2d3a8c; text-align: center; }
+h2 { font-size: 1.1rem; font-weight: bold; margin-bottom: 12px; color: #374151; }
+.card { background: white; border-radius: 16px; padding: 20px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+input[type=text] { width: 100%; padding: 12px; border: 2px solid #e5e7eb; border-radius: 10px; font-size: 1rem; outline: none; }
+input[type=text]:focus { border-color: #6366f1; }
+button { cursor: pointer; border: none; border-radius: 10px; font-size: 1rem; padding: 12px 20px; transition: transform 0.1s; }
+button:active { transform: scale(0.97); }
+.btn-primary { background: #6366f1; color: white; width: 100%; margin-top: 10px; font-weight: bold; }
+.btn-success { background: #22c55e; color: white; }
+.btn-amber { background: #f59e0b; color: white; }
+.badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 0.78rem; font-weight: bold; }
+.badge-blue { background: #dbeafe; color: #1d4ed8; }
+.badge-green { background: #dcfce7; color: #15803d; }
+.badge-yellow { background: #fef9c3; color: #a16207; }
+.hint { font-size: 0.82rem; color: #6b7280; margin-top: 6px; }
+.remove-btn { background: #fee2e2; color: #dc2626; border: none; border-radius: 6px; padding: 4px 10px; font-size: 0.8rem; cursor: pointer; }
+.player-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f3f4f6; }
+.player-item:last-child { border-bottom: none; }
+.progress-bar-wrap { background: #e5e7eb; border-radius: 999px; height: 8px; margin: 8px 0; }
+.progress-bar { background: #6366f1; height: 8px; border-radius: 999px; transition: width 0.4s; }
+.answer-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border-radius: 8px; background: #f9fafb; margin-bottom: 6px; font-size: 0.95rem; }
+.answer-row .player-name { font-weight: bold; min-width: 80px; }
+.answer-row .answer-val { color: #4b5563; flex: 1; margin: 0 10px; }
+.option-btn { width: 100%; text-align: left; padding: 14px 16px; margin-bottom: 10px; background: #f3f4f6; border-radius: 12px; font-size: 1rem; color: #111827; }
+.option-btn.selected { background: #6366f1; color: white; font-weight: bold; }
+.score-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #f3f4f6; }
+.score-row:last-child { border-bottom: none; }
+#screen-top { padding-top: 60px; text-align: center; }
+#screen-top p { color: #6b7280; margin-bottom: 32px; }
+.role-btn { width: 100%; max-width: 320px; margin: 8px auto; display: block; padding: 16px; font-size: 1.05rem; font-weight: bold; border-radius: 14px; }
+.room-id-box { background: #eef2ff; border-radius: 12px; padding: 16px; text-align: center; margin-bottom: 12px; }
+.room-id-text { font-size: 2.5rem; font-weight: bold; color: #4338ca; letter-spacing: 0.2em; }
+.center { text-align: center; padding-top: 60px; }
+</style>
+</head>
+<body>
+
+<!-- TOP -->
+<div id="screen-top" class="screen active">
+  <h1 style="font-size:1.8rem;">🎭 私はだれでしょう？</h1>
+  <p>会社合宿 自己紹介クイズ</p>
+  <button class="role-btn btn-primary" onclick="gotoHostSetup()">👑 司会として始める</button>
+  <button class="role-btn" style="background:#e0e7ff;color:#3730a3;font-weight:bold;" onclick="gotoPlayerJoin()">🙋 参加者として入る</button>
+</div>
+
+<!-- HOST SETUP -->
+<div id="screen-host-setup" class="screen">
+  <h1>👑 司会：ゲーム設定</h1>
+  <div class="card">
+    <h2>参加者リスト <span class="badge badge-blue" id="player-count">0人</span></h2>
+    <div id="player-list"></div>
+    <div style="margin-top:12px;display:flex;gap:8px;">
+      <input type="text" id="add-player-input" placeholder="参加者名を入力" onkeydown="if(event.key==='Enter')addPlayer()">
+      <button class="btn-primary" style="width:auto;margin:0;white-space:nowrap;" onclick="addPlayer()">追加</button>
+    </div>
+  </div>
+  <div class="card">
+    <h2>⚙️ 設定</h2>
+    <label style="display:flex;align-items:center;gap:8px;font-size:0.95rem;cursor:pointer;">
+      <input type="checkbox" id="chk-self-exclude" checked> 自分のひとことは選択肢から除外する
+    </label>
+  </div>
+  <button class="btn-primary" onclick="hostStartPeer()" id="btn-start" disabled>接続を開始する</button>
+</div>
+
+<!-- HOST WAIT PLAYERS -->
+<div id="screen-host-wait-players" class="screen">
+  <h1>👑 参加者を待っています</h1>
+  <div class="card">
+    <p style="font-size:0.85rem;color:#6b7280;margin-bottom:8px;">参加者にこのルームIDを共有してください</p>
+    <div class="room-id-box">
+      <div class="room-id-text" id="room-id-display">----</div>
+    </div>
+    <button class="btn-primary" style="margin-top:4px;" onclick="copyRoomId()">📋 ルームIDをコピー</button>
+  </div>
+  <div class="card">
+    <h2>接続済み <span class="badge badge-green" id="connected-count">0人</span></h2>
+    <div id="connected-list"><p class="hint">まだ誰も接続していません</p></div>
+  </div>
+  <button class="btn-primary" onclick="hostStartGame()">ゲームスタート ▶</button>
+</div>
+
+<!-- HOST GAME -->
+<div id="screen-host-game" class="screen">
+  <h1>👑 司会パネル</h1>
+  <div id="host-phase-input" class="card">
+    <h2>📝 今回のひとこと</h2>
+    <input type="text" id="question-input" placeholder="例：毎朝5時に起きています" style="margin-bottom:10px;">
+    <button class="btn-primary" style="margin-top:0;" onclick="publishQuestion()">出題する</button>
+    <p class="hint">※正解者は回答公開後に入力します</p>
+  </div>
+  <div id="host-phase-waiting" class="card" style="display:none;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+      <h2 style="margin:0;">⏳ 回答待ち中</h2>
+      <span id="answer-progress-text" class="badge badge-yellow">0/0人</span>
+    </div>
+    <div class="progress-bar-wrap"><div class="progress-bar" id="answer-progress-bar" style="width:0%"></div></div>
+    <div class="card" style="background:#f9fafb;margin-bottom:0;">
+      <p style="font-size:0.85rem;color:#6b7280;margin-bottom:4px;">今回のひとこと</p>
+      <p id="host-question-display" style="font-weight:bold;font-size:1.05rem;"></p>
+    </div>
+    <div id="answer-list" style="margin-top:10px;"></div>
+    <div id="reveal-btn-wrap" style="margin-top:8px;"></div>
+  </div>
+  <div id="host-phase-reveal" class="card" style="display:none;">
+    <h2>📋 回答一覧</h2>
+    <div id="reveal-list"></div>
+    <div class="card" style="background:#f0fdf4;margin-top:8px;">
+      <p style="font-size:0.85rem;color:#166534;margin-bottom:6px;">✅ 正解者を選んでください</p>
+      <select id="answer-owner-reveal" style="width:100%;padding:10px;border-radius:10px;border:2px solid #86efac;font-size:1rem;outline:none;margin-bottom:8px;"></select>
+      <button class="btn-success" style="width:100%;" onclick="confirmAnswer()">正解を確定する</button>
+    </div>
+  </div>
+  <div id="host-phase-confirmed" class="card" style="display:none;">
+    <h2>🎉 正解発表</h2>
+    <div class="card" style="background:#fef9c3;margin-bottom:12px;">
+      <p style="font-size:0.85rem;color:#92400e;">正解は…</p>
+      <p id="reveal-answer" style="font-size:1.3rem;font-weight:bold;color:#92400e;"></p>
+    </div>
+    <div id="reveal-list-confirmed"></div>
+    <div style="display:flex;gap:10px;margin-top:10px;">
+      <button class="btn-primary" style="flex:1;margin:0;" onclick="nextQuestion()">➡️ 次の問題へ</button>
+      <button class="btn-success" style="flex:1;" onclick="showResult()">🏆 結果発表へ</button>
+    </div>
+  </div>
+</div>
+
+<!-- PLAYER JOIN -->
+<div id="screen-player-join" class="screen">
+  <h1>🙋 参加者ログイン</h1>
+  <div class="card">
+    <h2>名前を入力してください</h2>
+    <input type="text" id="player-name-input" placeholder="あなたの名前" style="margin-bottom:12px;">
+    <h2>ルームIDを入力してください</h2>
+    <input type="text" id="room-id-input" placeholder="例：AB12" style="text-transform:uppercase;letter-spacing:0.1em;">
+    <button class="btn-primary" onclick="playerJoin()">参加する</button>
+  </div>
+</div>
+
+<!-- PLAYER CONNECTING -->
+<div id="screen-player-connecting" class="screen center">
+  <div style="font-size:2.5rem;margin-bottom:12px;">🔗</div>
+  <p id="connecting-msg" style="color:#6b7280;">接続中です…</p>
+</div>
+
+<!-- PLAYER WAIT -->
+<div id="screen-player-wait" class="screen center">
+  <div style="font-size:3rem;margin-bottom:12px;">⏰</div>
+  <h2 id="wait-msg">司会が問題を準備中です…</h2>
+</div>
+
+<!-- PLAYER ANSWER -->
+<div id="screen-player-answer" class="screen">
+  <h1>❓ だれのひとこと？</h1>
+  <div class="card" style="background:#eef2ff;">
+    <p style="font-size:0.85rem;color:#4338ca;margin-bottom:4px;">今回のひとこと</p>
+    <p id="player-question-display" style="font-size:1.1rem;font-weight:bold;color:#1e1b4b;"></p>
+  </div>
+  <div id="options-list"></div>
+  <div id="player-submitted" style="text-align:center;padding:30px 0;display:none;">
+    <div style="font-size:2.5rem;margin-bottom:8px;">✅</div>
+    <p style="font-weight:bold;">回答済み！</p>
+    <p class="hint">他の人の回答を待っています…</p>
+  </div>
+</div>
+
+<!-- PLAYER REVEAL -->
+<div id="screen-player-reveal" class="screen">
+  <h1>🎉 正解発表！</h1>
+  <div class="card" style="background:#fef9c3;margin-bottom:12px;">
+    <p style="font-size:0.85rem;color:#92400e;">正解は…</p>
+    <p id="player-reveal-answer" style="font-size:1.3rem;font-weight:bold;color:#92400e;"></p>
+  </div>
+  <div id="player-reveal-result"></div>
+  <div class="card" style="text-align:center;">
+    <p style="font-size:0.85rem;color:#6b7280;margin-bottom:4px;">現在のスコア</p>
+    <p id="player-score-display" style="font-size:2rem;font-weight:bold;color:#6366f1;"></p>
+  </div>
+  <p class="hint" style="text-align:center;margin-top:8px;">⏳ 次の問題を待っています…</p>
+</div>
+
+<!-- RESULT -->
+<div id="screen-result" class="screen">
+  <h1>🏆 最終結果</h1>
+  <div class="card" id="result-list"></div>
+  <button class="btn-primary" onclick="location.reload()">🔄 最初からやり直す</button>
+</div>
+
+<script>
+const S = {
+  role: null, peer: null, hostConn: null,
+  playerConns: {}, playerNames: {},
+  players: [], answers: {}, currentQ: null,
+  selfExclude: true, myName: null, mySelected: null,
+  _myScore: 0, _scoredQs: new Set(),
+};
+
+function show(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+function genRoomId() {
+  return Math.random().toString(36).slice(2,6).toUpperCase();
+}
+
+// ── HOST SETUP ──
+function gotoHostSetup() {
+  S.role = 'host'; show('screen-host-setup'); renderPlayerList();
+}
+function addPlayer() {
+  const inp = document.getElementById('add-player-input');
+  const name = inp.value.trim();
+  if (!name) return;
+  if (S.players.find(p => p.name === name)) { alert('同じ名前があります'); return; }
+  S.players.push({ name, score: 0 }); inp.value = ''; renderPlayerList();
+}
+function removePlayer(name) {
+  S.players = S.players.filter(p => p.name !== name); renderPlayerList();
+}
+function renderPlayerList() {
+  document.getElementById('player-count').textContent = S.players.length + '人';
+  document.getElementById('player-list').innerHTML = S.players.map(p =>
+    `<div class="player-item"><span>${p.name}</span><button class="remove-btn" onclick="removePlayer('${p.name}')">削除</button></div>`
+  ).join('');
+  document.getElementById('btn-start').disabled = S.players.length < 2;
+}
+
+// ── HOST PEER ──
+function hostStartPeer() {
+  S.selfExclude = document.getElementById('chk-self-exclude').checked;
+  const roomId = genRoomId();
+  S.peer = new Peer('quiz-' + roomId, { debug: 0 });
+  S.peer.on('open', () => {
+    document.getElementById('room-id-display').textContent = roomId;
+    show('screen-host-wait-players');
+  });
+  S.peer.on('connection', conn => {
+    conn.on('open', () => {
+      S.playerConns[conn.peer] = conn;
+      conn.on('data', data => hostReceive(conn.peer, data));
+      conn.on('close', () => { delete S.playerConns[conn.peer]; delete S.playerNames[conn.peer]; renderConnectedList(); });
+    });
+  });
+  S.peer.on('error', e => alert('接続エラー: ' + e.type + '\n' + e.message));
+}
+function copyRoomId() {
+  const id = document.getElementById('room-id-display').textContent;
+  navigator.clipboard.writeText(id).then(() => alert('ルームID「' + id + '」をコピーしました！'));
+}
+function renderConnectedList() {
+  const names = Object.values(S.playerNames);
+  document.getElementById('connected-count').textContent = names.length + '人';
+  document.getElementById('connected-list').innerHTML = names.length
+    ? names.map(n => `<div class="player-item"><span>🟢 ${n}</span></div>`).join('')
+    : '<p class="hint">まだ誰も接続していません</p>';
+}
+function hostReceive(peerId, data) {
+  if (data.type === 'join') {
+    S.playerNames[peerId] = data.name; renderConnectedList();
+  } else if (data.type === 'answer') {
+    S.answers[data.name] = data.answer; renderWaitingPhase();
+  }
+}
+function hostBroadcast(data) {
+  Object.values(S.playerConns).forEach(conn => { try { conn.send(data); } catch(e) {} });
+}
+function hostStartGame() {
+  hostBroadcast({ type: 'start', players: S.players.map(p => p.name), selfExclude: S.selfExclude });
+  showHostPhase('input'); show('screen-host-game');
+}
+
+// ── HOST GAME ──
+function showHostPhase(p) {
+  ['input','waiting','reveal','confirmed'].forEach(x => {
+    document.getElementById('host-phase-' + x).style.display = x === p ? '' : 'none';
+  });
+}
+function publishQuestion() {
+  const text = document.getElementById('question-input').value.trim();
+  if (!text) { alert('ひとことを入力してください'); return; }
+  S.currentQ = { text, ownerName: null }; S.answers = {};
+  hostBroadcast({ type: 'question', text, players: S.players.map(p => p.name), selfExclude: S.selfExclude });
+  document.getElementById('host-question-display').textContent = text;
+  document.getElementById('answer-list').innerHTML = '';
+  document.getElementById('reveal-btn-wrap').innerHTML = '';
+  showHostPhase('waiting'); renderWaitingPhase();
+}
+function renderWaitingPhase() {
+  const total = S.players.length, done = Object.keys(S.answers).length;
+  document.getElementById('answer-progress-text').textContent = `${done}/${total}人`;
+  document.getElementById('answer-progress-bar').style.width = (total ? done/total*100 : 0) + '%';
+  document.getElementById('answer-list').innerHTML = S.players.map(p =>
+    `<div class="answer-row"><span class="player-name">${p.name}</span>
+     <span class="answer-val">${S.answers[p.name] !== undefined ? '✅ 回答済み' : '⏳ 未回答'}</span></div>`
+  ).join('');
+  const rem = total - done;
+  document.getElementById('reveal-btn-wrap').innerHTML =
+    `<button class="btn-amber" style="width:100%;font-weight:bold;" onclick="revealAnswers()">
+      🔓 ${rem > 0 ? `回答を公開する（未回答 ${rem}人）` : '全員回答済み！回答を公開する'}
+    </button>`;
+}
+function revealAnswers() {
+  hostBroadcast({ type: 'reveal', answers: S.answers });
+  document.getElementById('reveal-list').innerHTML = S.players.map(p =>
+    `<div class="answer-row"><span class="player-name">${p.name}</span>
+     <span class="answer-val">→ ${S.answers[p.name] || '未回答'}</span></div>`
+  ).join('');
+  document.getElementById('answer-owner-reveal').innerHTML =
+    S.players.map(p => `<option value="${p.name}">${p.name}</option>`).join('');
+  showHostPhase('reveal');
+}
+function confirmAnswer() {
+  const owner = document.getElementById('answer-owner-reveal').value;
+  S.currentQ.ownerName = owner;
+  S.players.forEach(p => { if (S.answers[p.name] === owner) p.score++; });
+  const scores = {}; S.players.forEach(p => scores[p.name] = p.score);
+  hostBroadcast({ type: 'confirmed', ownerName: owner, question: S.currentQ.text, answers: S.answers, scores });
+  document.getElementById('reveal-answer').textContent = owner + ' さん';
+  document.getElementById('reveal-list-confirmed').innerHTML = S.players.map(p => {
+    const ans = S.answers[p.name], ok = ans === owner;
+    const bg = ans ? (ok ? '#dcfce7' : '#fee2e2') : '#f9fafb';
+    return `<div class="answer-row" style="background:${bg}">
+      <span class="player-name">${p.name}</span>
+      <span class="answer-val">→ ${ans || '未回答'}</span>
+      <span>${ans ? (ok ? '⭕' : '❌') : '－'}</span></div>`;
+  }).join('');
+  showHostPhase('confirmed');
+}
+function nextQuestion() {
+  hostBroadcast({ type: 'next' });
+  document.getElementById('question-input').value = '';
+  showHostPhase('input');
+}
+function showResult() {
+  const scores = {}; S.players.forEach(p => scores[p.name] = p.score);
+  hostBroadcast({ type: 'result', scores });
+  renderResultScreen(scores); show('screen-result');
+}
+function renderResultScreen(scores) {
+  const sorted = Object.entries(scores).sort((a,b) => b[1]-a[1]);
+  const ranks = ['🥇','🥈','🥉'];
+  document.getElementById('result-list').innerHTML = sorted.map(([name, score], i) =>
+    `<div class="score-row">
+      <span style="font-size:1.3rem;margin-right:10px;">${ranks[i]||(i+1)+'位'}</span>
+      <span style="font-weight:bold;flex:1;">${name}</span>
+      <span style="font-size:1.2rem;font-weight:bold;color:#6366f1;">${score}問正解</span></div>`
+  ).join('');
+}
+
+// ── PLAYER ──
+function gotoPlayerJoin() { S.role = 'player'; show('screen-player-join'); }
+function playerJoin() {
+  const name = document.getElementById('player-name-input').value.trim();
+  const roomId = document.getElementById('room-id-input').value.trim().toUpperCase();
+  if (!name) { alert('名前を入力してください'); return; }
+  if (!roomId) { alert('ルームIDを入力してください'); return; }
+  S.myName = name; S._myScore = 0; S._scoredQs = new Set();
+  show('screen-player-connecting');
+  S.peer = new Peer({ debug: 0 });
+  S.peer.on('open', () => {
+    const conn = S.peer.connect('quiz-' + roomId);
+    S.hostConn = conn;
+    conn.on('open', () => {
+      conn.send({ type: 'join', name });
+      show('screen-player-wait');
+      document.getElementById('wait-msg').textContent = '司会がゲームを準備中です…';
+    });
+    conn.on('data', data => playerReceive(data));
+    conn.on('close', () => alert('司会との接続が切れました。ページを再読み込みしてください。'));
+  });
+  S.peer.on('error', e => {
+    alert('接続できませんでした。ルームIDを確認してください。\nエラー: ' + e.type);
+    show('screen-player-join');
+  });
+}
+function playerReceive(data) {
+  if (data.type === 'start') {
+    document.getElementById('wait-msg').textContent = '司会が問題を準備中です…';
+  } else if (data.type === 'question') {
+    S.mySelected = null;
+    document.getElementById('player-question-display').textContent = data.text;
+    let opts = [...(data.players||[])];
+    if (data.selfExclude) opts = opts.filter(n => n !== S.myName);
+    document.getElementById('options-list').innerHTML = opts.map(n =>
+      `<button class="option-btn" id="opt-${CSS.escape(n)}" onclick="selectOption('${n}')">${n}</button>`
+    ).join('');
+    document.getElementById('options-list').style.display = '';
+    document.getElementById('player-submitted').style.display = 'none';
+    show('screen-player-answer');
+  } else if (data.type === 'reveal') {
+    document.getElementById('wait-msg').textContent = '正解を発表中です…';
+    show('screen-player-wait');
+  } else if (data.type === 'confirmed') {
+    showPlayerReveal(data);
+  } else if (data.type === 'next') {
+    S.mySelected = null;
+    document.getElementById('wait-msg').textContent = '次の問題を準備中です…';
+    show('screen-player-wait');
+  } else if (data.type === 'result') {
+    showPlayerResult(data.scores);
+  }
+}
+function selectOption(name) {
+  S.mySelected = name;
+  document.querySelectorAll('.option-btn').forEach(b => b.classList.remove('selected'));
+  const btn = document.getElementById('opt-' + CSS.escape(name));
+  if (btn) btn.classList.add('selected');
+  setTimeout(() => {
+    if (!S.mySelected || !S.hostConn) return;
+    S.hostConn.send({ type: 'answer', name: S.myName, answer: S.mySelected });
+    document.getElementById('options-list').style.display = 'none';
+    document.getElementById('player-submitted').style.display = '';
+  }, 300);
+}
+function showPlayerReveal(data) {
+  const owner = data.ownerName;
+  document.getElementById('player-reveal-answer').textContent = owner + ' さん';
+  const myAns = data.answers ? data.answers[S.myName] : null;
+  const correct = myAns === owner;
+  if (correct && !S._scoredQs.has(data.question)) { S._myScore++; S._scoredQs.add(data.question); }
+  document.getElementById('player-reveal-result').innerHTML =
+    `<div class="card" style="background:${correct?'#dcfce7':'#fee2e2'};text-align:center;margin-bottom:12px;">
+      <p style="font-size:1.5rem;">${correct ? '⭕ 正解！' : '❌ 不正解'}</p>
+      <p style="font-size:0.9rem;color:#374151;">あなたの回答：${myAns||'未回答'}</p></div>`;
+  document.getElementById('player-score-display').textContent = S._myScore + '問正解';
+  show('screen-player-reveal');
+}
+function showPlayerResult(scores) {
+  const sorted = Object.entries(scores).sort((a,b) => b[1]-a[1]);
+  const ranks = ['🥇','🥈','🥉'];
+  document.getElementById('result-list').innerHTML = sorted.map(([name, score], i) =>
+    `<div class="score-row" style="${name===S.myName?'background:#eef2ff;border-radius:8px;padding:10px;':''}">
+      <span style="font-size:1.3rem;margin-right:10px;">${ranks[i]||(i+1)+'位'}</span>
+      <span style="font-weight:bold;flex:1;">${name}${name===S.myName?' 👈':''}</span>
+      <span style="font-size:1.2rem;font-weight:bold;color:#6366f1;">${score}問正解</span></div>`
+  ).join('');
+  show('screen-result');
+}
+</script>
+</body>
+</html>
